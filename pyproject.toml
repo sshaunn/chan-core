@@ -5,23 +5,21 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "chan-core"
 version = "0.1.0"
-description = "Core computation engine"
+description = "Chan theory structure-layer computation engine"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 license = {text = "Apache-2.0"}
 authors = [
     {name = "Shenpeng", email = "shenpeng@example.com"}
 ]
-keywords = ["computation", "engine"]
+keywords = ["chan", "structure", "computation"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries",
 ]
 
@@ -29,29 +27,16 @@ classifiers = [
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
-    "black>=23.0",
-    "flake8>=6.0",
     "mypy>=1.0",
-    "isort>=5.0",
 ]
 
-[tool.setuptools]
-packages = ["chan_core"]
-
-[tool.black]
-line-length = 100
-target-version = ["py39"]
-
-[tool.isort]
-profile = "black"
-line_length = 100
+[tool.setuptools.packages.find]
+include = ["chan_core*"]
 
 [tool.mypy]
-python_version = "3.9"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
+python_version = "3.12"
+strict = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=chan_core --cov-report=html --cov-report=term-missing"
+addopts = "--tb=short -q"
