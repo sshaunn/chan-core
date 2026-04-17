@@ -64,42 +64,42 @@ def test_c1_same_index() -> None:
 
 
 # ═══════════════════════════════════════════════════════════
-#  check_c2 — merged K-line gap between middles
+#  check_c2 — raw K-line gap between fractal extremes
 # ═══════════════════════════════════════════════════════════
 
 
-def test_c2_gap_5_passes() -> None:
-    """Merged index gap = 5 → 4 bars between → passes (≥ 4)."""
+def test_c2_raw_gap_4_passes() -> None:
+    """Raw index gap = 5 → ≥ 3 → passes."""
     a = _top(10, 1)
-    b = _bot(5, 6)  # gap = 5, bars_between = 4
+    b = _bot(5, 6)  # raw gap = 6 - 1 = 5
     assert check_c2(a, b) is True
 
 
-def test_c2_gap_6_passes() -> None:
-    """Merged index gap = 6 → 5 bars between → passes."""
+def test_c2_raw_gap_3_fails() -> None:
+    """Raw index gap = 3 → below ≥ 4 threshold → fails."""
     a = _top(10, 1)
-    b = _bot(5, 7)  # gap = 6
-    assert check_c2(a, b) is True
-
-
-def test_c2_gap_4_fails() -> None:
-    """Merged index gap = 4 → 3 bars between → fails (< 4)."""
-    a = _top(10, 1)
-    b = _bot(5, 5)  # gap = 4, bars_between = 3
+    b = _bot(5, 4)  # raw gap = 4 - 1 = 3
     assert check_c2(a, b) is False
 
 
-def test_c2_gap_3_fails() -> None:
-    """Merged index gap = 3 → 2 bars between → fails."""
+def test_c2_raw_gap_2_fails() -> None:
+    """Raw index gap = 2 → below threshold → fails."""
     a = _top(10, 1)
-    b = _bot(5, 4)  # gap = 3, bars_between = 2
+    b = _bot(5, 3)  # raw gap = 3 - 1 = 2
     assert check_c2(a, b) is False
 
 
-def test_c2_gap_large_passes() -> None:
+def test_c2_raw_gap_1_fails() -> None:
+    """Raw index gap = 1 → fails."""
+    a = _top(10, 1)
+    b = _bot(5, 2)  # raw gap = 2 - 1 = 1
+    assert check_c2(a, b) is False
+
+
+def test_c2_raw_gap_large_passes() -> None:
     """Large gap always passes."""
     a = _top(10, 1)
-    b = _bot(5, 20)  # gap = 19
+    b = _bot(5, 20)  # raw gap = 19
     assert check_c2(a, b) is True
 
 
@@ -182,9 +182,27 @@ def test_confirmed_opposite_c1_fail_skips() -> None:
 
 
 def test_confirmed_opposite_c2_fail_skips() -> None:
-    """Opposite type, C1 passes but C2 fails → skipped."""
-    t = _top(10, 5)
-    b = _bot(3, 9)  # gap=4, bars_between=3 → C2 fails
+    """Opposite type, C1 passes but C2 fails (raw gap < 3) → skipped.
+
+    With raw K-line gap C2, we need merged index gap ≥ 3 (C1 pass) but
+    raw gap < 3 (C2 fail). This requires multi-element source_indices
+    so the merged bar's last raw index is close to the next bar's first.
+    """
+    # Build fractals with multi-element source_indices to decouple merged/raw gap
+    # TOP at merged index 5, middle kline covers raw indices 5,6,7
+    left_t = MergedKLine(high=8, low=6, timestamp="t4", source_indices=(4,))
+    mid_t = MergedKLine(high=10, low=8, timestamp="t5", source_indices=(5, 6, 7))
+    right_t = MergedKLine(high=8, low=6, timestamp="t6", source_indices=(8,))
+    t = Fractal(type=FractalType.TOP, value=10, klines=(left_t, mid_t, right_t), index=5)
+
+    # BOT at merged index 8, middle kline covers raw indices 9
+    # merged gap = 3 → C1 passes (no shared klines: 4,5,6 vs 7,8,9)
+    # raw gap = min(9) - max(5,6,7) = 9 - 7 = 2 → C2 fails
+    left_b = MergedKLine(high=7, low=5, timestamp="t7", source_indices=(9,))
+    mid_b = MergedKLine(high=5, low=3, timestamp="t8", source_indices=(9,))
+    right_b = MergedKLine(high=7, low=5, timestamp="t9", source_indices=(10,))
+    b = Fractal(type=FractalType.BOT, value=3, klines=(left_b, mid_b, right_b), index=8)
+
     result = build_confirmed([t, b])
     assert len(result) == 1
 
@@ -287,7 +305,7 @@ def test_all_opposite_fail_c2() -> None:
 
 
 # ═══════════════════════════════════════════════════════════
-#  Fixed sample: 300811.SZ 17 pens
+#  Fixed sample: 300811.SZ 21 pens
 # ═══════════════════════════════════════════════════════════
 
 
@@ -323,14 +341,18 @@ _EXPECTED_PENS = [
     {"dir": Direction.DOWN, "start_val": 44.88, "end_val": 40.51, "high": 44.88, "low": 40.51},
     {"dir": Direction.UP, "start_val": 40.51, "end_val": 62.53, "high": 62.53, "low": 40.51},
     {"dir": Direction.DOWN, "start_val": 62.53, "end_val": 54.40, "high": 62.53, "low": 54.40},
-    {"dir": Direction.UP, "start_val": 54.40, "end_val": 82.50, "high": 82.50, "low": 54.40},
-    {"dir": Direction.DOWN, "start_val": 82.50, "end_val": 68.59, "high": 82.50, "low": 68.59},
+    {"dir": Direction.UP, "start_val": 54.40, "end_val": 77.95, "high": 77.95, "low": 54.40},
+    {"dir": Direction.DOWN, "start_val": 77.95, "end_val": 69.70, "high": 77.95, "low": 69.70},
+    {"dir": Direction.UP, "start_val": 69.70, "end_val": 82.50, "high": 82.50, "low": 69.70},
+    {"dir": Direction.DOWN, "start_val": 82.50, "end_val": 68.01, "high": 82.50, "low": 68.01},
+    {"dir": Direction.UP, "start_val": 68.01, "end_val": 79.77, "high": 79.77, "low": 68.01},
+    {"dir": Direction.DOWN, "start_val": 79.77, "end_val": 68.59, "high": 79.77, "low": 68.59},
     {"dir": Direction.UP, "start_val": 68.59, "end_val": 87.36, "high": 87.36, "low": 68.59},
     {"dir": Direction.DOWN, "start_val": 87.36, "end_val": 65.10, "high": 87.36, "low": 65.10},
     {"dir": Direction.UP, "start_val": 65.10, "end_val": 76.78, "high": 76.78, "low": 65.10},
     {"dir": Direction.DOWN, "start_val": 76.78, "end_val": 67.53, "high": 76.78, "low": 67.53},
-    {"dir": Direction.UP, "start_val": 67.53, "end_val": 86.10, "high": 86.10, "low": 67.53},
-    {"dir": Direction.DOWN, "start_val": 86.10, "end_val": 73.05, "high": 86.10, "low": 73.05},
+    {"dir": Direction.UP, "start_val": 67.53, "end_val": 84.10, "high": 84.10, "low": 67.53},
+    {"dir": Direction.DOWN, "start_val": 84.10, "end_val": 73.05, "high": 84.10, "low": 73.05},
     {"dir": Direction.UP, "start_val": 73.05, "end_val": 91.00, "high": 91.00, "low": 73.05},
     {"dir": Direction.DOWN, "start_val": 91.00, "end_val": 75.03, "high": 91.00, "low": 75.03},
     {"dir": Direction.UP, "start_val": 75.03, "end_val": 81.96, "high": 81.96, "low": 75.03},
@@ -340,7 +362,7 @@ _EXPECTED_PENS = [
 
 def test_300811_pen_count() -> None:
     pens = _load_300811_pens()
-    assert len(pens) == 17, f"Expected 17 pens, got {len(pens)}"
+    assert len(pens) == 21, f"Expected 21 pens, got {len(pens)}"
 
 
 def test_300811_pen_values() -> None:

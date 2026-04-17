@@ -12,7 +12,7 @@ from chan_core.structure._completion import (
     build_exit_sequence,
     find_i_star,
     is_awaiting_new_pivot,
-    structure_complete_l0,
+    structure_complete_by_pivot,
 )
 from chan_core.structure._fractal import Fractal, find_fractals
 from chan_core.structure._merge import merge_inclusive
@@ -140,7 +140,7 @@ def test_exit_sequence_with_leave() -> None:
 
 
 def test_structure_complete_no_pivots() -> None:
-    trace = structure_complete_l0([], [])
+    trace = structure_complete_by_pivot([], [])
     assert trace.i_star is None
     assert trace.t_end is None
     assert trace.awaiting_new_pivot is False
@@ -157,7 +157,7 @@ def test_structure_complete_awaiting() -> None:
     ]
     pivots = search_pivots(pens)
     assert len(pivots) >= 1
-    trace = structure_complete_l0(pivots, pens)
+    trace = structure_complete_by_pivot(pivots, pens)
     # May or may not be awaiting depending on whether exit_seq forms
     # Check the trace is valid
     assert isinstance(trace, CompletionTrace)
@@ -195,53 +195,52 @@ def _load_300811() -> tuple[list[Pen], list[PivotBuilder]]:
     return pens, pivots
 
 
-def test_300811_t1_structure_complete() -> None:
-    """T1 (containing Z0): structure_complete = True.
+def test_300811_t0_structure_complete() -> None:
+    """T0 (containing Z0): structure_complete = True.
 
-    ExitSeq starts from P5 (leave_pen P4 + 1).
+    ExitSeq starts from P5 (first pen after Z0.exit_time that doesn't overlap [ZD,ZG]).
     i* = 0 (first three in exit seq form new pivot).
     """
     pens, pivots = _load_300811()
     assert len(pivots) == 2
 
-    # Use only Z0 for T1 analysis
-    trace = structure_complete_l0([pivots[0]], pens)
+    # Use only Z0 for T0 analysis
+    trace = structure_complete_by_pivot([pivots[0]], pens)
     assert trace.i_star is not None
     assert trace.t_end is not None
     assert trace.awaiting_new_pivot is False
 
 
-def test_300811_t1_i_star_value() -> None:
+def test_300811_t0_i_star_value() -> None:
     """i* should be 0 (first group of exit seq forms pivot)."""
     pens, pivots = _load_300811()
-    trace = structure_complete_l0([pivots[0]], pens)
+    trace = structure_complete_by_pivot([pivots[0]], pens)
     assert trace.i_star == 0  # 0-based index
 
 
-def test_300811_t1_classification() -> None:
-    """T1 has 1 pivot → consolidation."""
+def test_300811_t0_classification() -> None:
+    """T0 has 1 pivot → consolidation."""
     pens, pivots = _load_300811()
-    trace = structure_complete_l0([pivots[0]], pens)
+    trace = structure_complete_by_pivot([pivots[0]], pens)
     snap_pivots = [pivots[0].to_snapshot()]
     trend = classify_trend(snap_pivots, trace.i_star is not None)
     assert trend == TrendType.CONSOLIDATION
 
 
-def test_300811_t2_not_complete() -> None:
-    """T2 (containing Z1): no leave → ExitSeq empty → not complete."""
+def test_300811_t1_not_complete() -> None:
+    """T1 (containing Z1): no leave → ExitSeq empty → not complete."""
     pens, pivots = _load_300811()
-    trace = structure_complete_l0([pivots[1]], pens)
+    trace = structure_complete_by_pivot([pivots[1]], pens)
     assert trace.i_star is None
     assert is_awaiting_new_pivot(trace) is False  # empty exit seq = not awaiting either
 
 
-def test_300811_t1_t_end_is_p4() -> None:
-    """t_end(T1) = t_end(P4) (connection segment before W_{i*})."""
+def test_300811_t0_t_end_is_p3() -> None:
+    """t_end(T0) = t_end(P3): last pen in T0 before ExitSeq starts."""
     pens, pivots = _load_300811()
-    trace = structure_complete_l0([pivots[0]], pens)
-    # P4 = pens[4], its end timestamp
-    p4_end = pens[4].end.klines[1].timestamp
-    assert trace.t_end == p4_end
+    trace = structure_complete_by_pivot([pivots[0]], pens)
+    p3_end = pens[3].end.klines[1].timestamp
+    assert trace.t_end == p3_end
 
 
 def test_300811_exit_seq_starts_from_p5() -> None:

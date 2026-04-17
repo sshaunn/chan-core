@@ -1,78 +1,70 @@
-"""Feature sequence (特征序列) construction and fractal detection.
+"""Feature sequence primitives for segment identification.
 
-Implements S04-S06: feature sequence used only inside segments,
-Type1End / Type2End termination, and t_extreme.
+See `structure/README.md` S04–S06 for the full specification.
+Book references: §6.2–§6.3 from Chan Theory.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
+from enum import Enum
 
 from chan_core.common.math_utils import overlap
 from chan_core.common.types import Direction
 from chan_core.structure._pen import Pen
 
 
+# ═══════════════════════════════════════════════════════════
+#  Types
+# ═══════════════════════════════════════════════════════════
+
+
+class EndType(Enum):
+    """Segment termination kind."""
+
+    TYPE1 = "TYPE1"          # §6.3.2 case 1: no gap at (C'_{j-1}, C'_j)
+    TYPE2 = "TYPE2"          # §6.3.2 case 2: gap + reverse sequence verified
+    EXTENDED = "EXTENDED"    # §6.3.3: segment absorbs subsequent reverse segment
+    EXTREME = "EXTREME"      # §6.3.4 case 1: extreme-price fallback
+    TENTATIVE = "TENTATIVE"  # §6.1.1: constructive tail, state=BUILDING
+
+
 @dataclass(frozen=True)
 class FeatureElement:
-    """A virtual K-line representing one or more opposite-direction pens.
-
-    Fields:
-        high:        highest price across all source pens
-        low:         lowest price across all source pens
-        source_pens: the pen(s) merged into this element
-    """
+    """Price interval + originating pens."""
 
     high: float
     low: float
-    source_pens: tuple[Pen, ...]
-
-    @property
-    def interval(self) -> tuple[float, float]:
-        return (self.low, self.high)
+    src_pens: tuple[Pen, ...]
 
 
-def build_feature_sequence(
-    pens: list[Pen], segment_direction: Direction
-) -> list[FeatureElement]:
-    """Extract opposite-direction pens as feature elements.
+@dataclass(frozen=True)
+class SegmentEndResult:
+    """Result emitted when Type1End or Type2End commits."""
 
-    For an UP segment, the feature sequence consists of DOWN pens.
-    For a DOWN segment, the feature sequence consists of UP pens.
-    """
-    opposite = Direction.DOWN if segment_direction == Direction.UP else Direction.UP
-    result: list[FeatureElement] = []
-    for p in pens:
-        if p.direction == opposite:
-            result.append(
-                FeatureElement(high=p.high, low=p.low, source_pens=(p,))
-            )
-    return result
+    j: int
+    end_price: float
+    end_type: EndType
+    end_feature_element: FeatureElement
 
 
-def _has_inclusion_fe(a: FeatureElement, b: FeatureElement) -> bool:
-    """Check inclusion between two feature elements (same rule as §4.2)."""
+# ═══════════════════════════════════════════════════════════
+#  Primitive predicates
+# ═══════════════════════════════════════════════════════════
+
+
+def _has_inclusion(a: FeatureElement, b: FeatureElement) -> bool:
+    """§6.2.2 inclusion between two feature elements."""
     return (a.high >= b.high and a.low <= b.low) or (
         b.high >= a.high and b.low <= a.low
     )
 
 
-def _get_direction_fe(
-    current: FeatureElement, prev: FeatureElement | None
-) -> Direction:
-    """Determine merge direction for feature elements."""
-    if prev is None:
-        return Direction.UP
-    if current.high >= prev.high:
-        return Direction.UP
-    if current.low <= prev.low:
-        return Direction.DOWN
-    return Direction.UP
-
-
-def _merge_two_fe(
-    a: FeatureElement, b: FeatureElement, direction: Direction
+def _merge_star(
+    a: FeatureElement, b: FeatureElement, d: Direction
 ) -> FeatureElement:
-    """Merge two feature elements with inclusion (same rule as §4.4)."""
-    if direction == Direction.UP:
+    """§6.2.3 directional merge: UP takes (max_h, max_l), DOWN takes (min_h, min_l)."""
+    if d == Direction.UP:
         new_high = max(a.high, b.high)
         new_low = max(a.low, b.low)
     else:
@@ -81,43 +73,20 @@ def _merge_two_fe(
     return FeatureElement(
         high=new_high,
         low=new_low,
-        source_pens=a.source_pens + b.source_pens,
+        src_pens=a.src_pens + b.src_pens,
     )
 
 
-def merge_feature_sequence(
-    elements: list[FeatureElement],
-) -> list[FeatureElement]:
-    """Apply inclusion merge to a feature sequence (single-pass left-to-right).
-
-    Same rules as §4.2-4.4 but applied to FeatureElement virtual K-lines.
-    """
-    if not elements:
-        return []
-
-    result: list[FeatureElement] = [elements[0]]
-
-    for elem in elements[1:]:
-        current = result[-1]
-        if _has_inclusion_fe(current, elem):
-            prev = result[-2] if len(result) >= 2 else None
-            direction = _get_direction_fe(current, prev)
-            merged = _merge_two_fe(current, elem, direction)
-            result[-1] = merged
-        else:
-            result.append(elem)
-
-    return result
+def _gap(a: FeatureElement, b: FeatureElement) -> bool:
+    """§6.2.1 gap: adjacent elements have no price overlap."""
+    return not overlap(a.low, a.high, b.low, b.high)
 
 
-def check_top_fseq(seq: list[FeatureElement], j: int) -> bool:
-    """Check if position j in the merged feature sequence forms a top fractal.
-
-    Strict inequalities on all four conditions (same as §5.1 / §7.3).
-    """
-    if j < 1 or j >= len(seq) - 1:
+def _top_fseq(C: list[FeatureElement], j: int) -> bool:
+    """Top fractal on feature sequence (strict four-way inequality)."""
+    if j < 1 or j >= len(C) - 1:
         return False
-    left, mid, right = seq[j - 1], seq[j], seq[j + 1]
+    left, mid, right = C[j - 1], C[j], C[j + 1]
     return (
         mid.high > left.high
         and mid.high > right.high
@@ -126,14 +95,11 @@ def check_top_fseq(seq: list[FeatureElement], j: int) -> bool:
     )
 
 
-def check_bot_fseq(seq: list[FeatureElement], j: int) -> bool:
-    """Check if position j in the merged feature sequence forms a bottom fractal.
-
-    Strict inequalities on all four conditions (same as §5.2 / §7.3).
-    """
-    if j < 1 or j >= len(seq) - 1:
+def _bot_fseq(C: list[FeatureElement], j: int) -> bool:
+    """Bottom fractal on feature sequence (strict four-way inequality)."""
+    if j < 1 or j >= len(C) - 1:
         return False
-    left, mid, right = seq[j - 1], seq[j], seq[j + 1]
+    left, mid, right = C[j - 1], C[j], C[j + 1]
     return (
         mid.low < left.low
         and mid.low < right.low
@@ -143,141 +109,284 @@ def check_bot_fseq(seq: list[FeatureElement], j: int) -> bool:
 
 
 # ═══════════════════════════════════════════════════════════
-#  Type1End / Type2End
+#  Reverse verification sequence (§6.3.2 case 2)
 # ═══════════════════════════════════════════════════════════
 
 
-def find_t_extreme(element: FeatureElement, direction: Direction) -> str:
-    """Find the extreme-value time anchor within a merged feature element.
-
-    For UP direction: find the pen with max high → return its end timestamp.
-    For DOWN direction: find the pen with min low → return its end timestamp.
-    Tie-break: multiple pens with same extreme → take earliest t_end.
-    """
-    pens = element.source_pens
-    if direction == Direction.UP:
-        extreme_val = max(p.high for p in pens)
-        candidates = [p for p in pens if p.high == extreme_val]
-    else:
-        extreme_val = min(p.low for p in pens)
-        candidates = [p for p in pens if p.low == extreme_val]
-
-    # Tie-break: earliest t_end (end fractal's middle kline timestamp)
-    best = min(candidates, key=lambda p: p.end.klines[1].timestamp)
-    return best.end.klines[1].timestamp
-
-
-def build_verification_sequence(
-    all_pens: list[Pen],
-    segment_direction: Direction,
-    t_extreme_val: str,
+def _std_verify(
+    F_suffix: list[FeatureElement], d_rev: Direction
 ) -> list[FeatureElement]:
-    """Build the verification sequence D' for Type2End.
+    """Standardise the verification sequence V.
 
-    For UP segment: collect UP pens whose start time > t_extreme,
-    treat as virtual K-lines, apply inclusion merge.
-    For DOWN segment: collect DOWN pens, same logic.
+    Unlike the primary C', the first two elements DO process inclusion
+    (book §6.3.2 case 2). Merge direction is reverse of segment direction.
     """
-    # Collect pens in the same direction as the segment, after t_extreme
-    candidates: list[Pen] = []
-    for p in all_pens:
-        if p.direction != segment_direction:
-            continue
-        p_start_time = p.start.klines[1].timestamp
-        if p_start_time > t_extreme_val:
-            candidates.append(p)
+    n = len(F_suffix)
+    if n == 0:
+        return []
+    if n == 1:
+        return [F_suffix[0]]
 
-    if not candidates:
+    result: list[FeatureElement] = [F_suffix[0]]
+    for i in range(1, n):
+        f = F_suffix[i]
+        if _has_inclusion(result[-1], f):
+            result[-1] = _merge_star(result[-1], f, d_rev)
+        else:
+            result.append(f)
+    return result
+
+
+def _extremum_candidate_set(
+    C_j: FeatureElement,
+    direction: Direction,
+    F: list[FeatureElement],
+) -> list[int]:
+    """Indices in F whose element achieves C_j's extremum (time-ascending)."""
+    if not C_j.src_pens:
         return []
 
-    # Convert to FeatureElements and apply inclusion merge
-    elements = [
-        FeatureElement(high=p.high, low=p.low, source_pens=(p,))
-        for p in candidates
-    ]
-    return merge_feature_sequence(elements)
+    target = C_j.high if direction == Direction.UP else C_j.low
+    src_pen_ids = set(id(p) for p in C_j.src_pens)
+
+    out: list[int] = []
+    for t, f in enumerate(F):
+        if len(f.src_pens) != 1:
+            continue
+        p = f.src_pens[0]
+        if id(p) not in src_pen_ids:
+            continue
+        val = f.high if direction == Direction.UP else f.low
+        if val == target:
+            out.append(t)
+    return out
 
 
-def check_type1_end(
-    pens: list[Pen], segment_direction: Direction
-) -> float | None:
-    """Check for Type1End termination.
+def _reverse_verify(
+    C_j: FeatureElement,
+    F: list[FeatureElement],
+    direction: Direction,
+) -> bool:
+    """§6.3.2 case 2: verify reverse fractal exists in standardised V."""
+    E_j = _extremum_candidate_set(C_j, direction, F)
+    if not E_j:
+        return False
+    t = min(E_j)
 
-    Returns the termination point (float) or None.
+    V = F[t:]
+    d_rev = Direction.DOWN if direction == Direction.UP else Direction.UP
+    V_std = _std_verify(V, d_rev)
+    if len(V_std) < 3:
+        return False
+
+    verify_fn = _bot_fseq if direction == Direction.UP else _top_fseq
+    for r in range(1, len(V_std) - 1):
+        if verify_fn(V_std, r):
+            return True
+    return False
+
+
+# ═══════════════════════════════════════════════════════════
+#  EigenFX: incremental state machine
+# ═══════════════════════════════════════════════════════════
+
+
+class EigenFX:
+    """Incremental feature sequence state machine.
+
+    Usage:
+        efx = EigenFX(direction=Direction.UP)
+        for pen in pens:
+            result = efx.add(pen)
+            if result is not None:
+                break  # segment terminated
+
+    O(1) amortised per add, based on stack invariants of C' and V'
+    (non-top positions are immutable once appended).
     """
-    fseq = build_feature_sequence(pens, segment_direction)
-    merged_fseq = merge_feature_sequence(fseq)
 
-    if len(merged_fseq) < 3:
+    def __init__(self, direction: Direction) -> None:
+        self.direction = direction
+        self._d_rev = (
+            Direction.DOWN if direction == Direction.UP else Direction.UP
+        )
+        self.C: list[FeatureElement] = []
+        self.F: list[FeatureElement] = []
+
+        # Pending state: at most one active, locked on earliest j with gap
+        self._pending_j: int | None = None
+        self._pending_mid: FeatureElement | None = None
+        self._pending_end_price: float | None = None
+        self._pending_V_std: list[FeatureElement] = []
+        self._pending_V_start_t_in_F: int = -1
+        self._pending_V_last_checked_r: int = 0
+
+    def add(self, pen: Pen) -> SegmentEndResult | None:
+        """Feed one pen; return a result if the segment terminates."""
+        if pen.direction == self.direction:
+            return None  # same-direction pens do not enter F
+
+        f = FeatureElement(high=pen.high, low=pen.low, src_pens=(pen,))
+        self.F.append(f)
+        new_f_idx_in_F = len(self.F) - 1
+
+        c_was_appended = self._push_with_inclusion_C(f)
+
+        # With active pending: only extend V and re-check the new r position.
+        if self._pending_j is not None:
+            if new_f_idx_in_F >= self._pending_V_start_t_in_F:
+                v_appended = self._push_V_std_with_inclusion(f)
+                if v_appended:
+                    result = self._check_new_bot_fractal_on_append()
+                    if result is not None:
+                        return result
+            return None
+
+        # No pending: a new stable j can only emerge when C appends.
+        if not c_was_appended:
+            return None
+        if len(self.C) < 3:
+            return None
+
+        j = len(self.C) - 2
+        main_fn = _top_fseq if self.direction == Direction.UP else _bot_fseq
+        if not main_fn(self.C, j):
+            return None
+
+        left = self.C[j - 1]
+        mid = self.C[j]
+        end_price = mid.high if self.direction == Direction.UP else mid.low
+
+        if not _gap(left, mid):
+            # §6.3.2 case 1: Type1End, commit immediately.
+            return SegmentEndResult(
+                j=j,
+                end_price=end_price,
+                end_type=EndType.TYPE1,
+                end_feature_element=mid,
+            )
+
+        # §6.3.2 case 2: enter pending for Type2End verification.
+        E_j = _extremum_candidate_set(mid, self.direction, self.F)
+        if not E_j:
+            return None
+        t = min(E_j)
+
+        self._pending_j = j
+        self._pending_mid = mid
+        self._pending_end_price = end_price
+        self._pending_V_start_t_in_F = t
+        self._pending_V_std = []
+        self._pending_V_last_checked_r = 0
+
+        # Seed V with existing suffix F[t:]; subsequent adds extend O(1).
+        for i in range(t, len(self.F)):
+            v_appended = self._push_V_std_with_inclusion(self.F[i])
+            if v_appended:
+                result = self._check_new_bot_fractal_on_append()
+                if result is not None:
+                    return result
+
         return None
 
-    # Which fractal type to look for in the feature sequence
-    if segment_direction == Direction.UP:
-        check_fn = check_top_fseq
-    else:
-        check_fn = check_bot_fseq
+    def _push_with_inclusion_C(self, f: FeatureElement) -> bool:
+        """Stack-push C; first two do not process inclusion (§6.2.3)."""
+        if len(self.C) < 2:
+            self.C.append(f)
+            return True
+        top = self.C[-1]
+        if _has_inclusion(top, f):
+            self.C[-1] = _merge_star(top, f, self.direction)
+            return False
+        self.C.append(f)
+        return True
 
-    for j in range(1, len(merged_fseq) - 1):
-        if not check_fn(merged_fseq, j):
-            continue
-        # Check overlap between C'_{j-1} and C'_j
-        prev_el, cur_el = merged_fseq[j - 1], merged_fseq[j]
-        if overlap(prev_el.low, prev_el.high, cur_el.low, cur_el.high):
-            # Type1End found
-            if segment_direction == Direction.UP:
-                return cur_el.high
-            else:
-                return cur_el.low
+    def _push_V_std_with_inclusion(self, f: FeatureElement) -> bool:
+        """Stack-push V; first two DO process inclusion (§6.3.2 case 2)."""
+        if not self._pending_V_std:
+            self._pending_V_std.append(f)
+            return True
+        top = self._pending_V_std[-1]
+        if _has_inclusion(top, f):
+            self._pending_V_std[-1] = _merge_star(top, f, self._d_rev)
+            return False
+        self._pending_V_std.append(f)
+        return True
 
-    return None
-
-
-def check_type2_end(
-    pens: list[Pen], segment_direction: Direction
-) -> float | None:
-    """Check for Type2End termination.
-
-    Returns the termination point (float) or None.
-    """
-    fseq = build_feature_sequence(pens, segment_direction)
-    merged_fseq = merge_feature_sequence(fseq)
-
-    if len(merged_fseq) < 3:
+    def _check_new_bot_fractal_on_append(self) -> SegmentEndResult | None:
+        """Check only the newly-stable r = len(V) - 2."""
+        V = self._pending_V_std
+        if len(V) < 3:
+            return None
+        r = len(V) - 2
+        if r <= self._pending_V_last_checked_r:
+            return None
+        self._pending_V_last_checked_r = r
+        verify_fn = (
+            _bot_fseq if self.direction == Direction.UP else _top_fseq
+        )
+        if verify_fn(V, r):
+            return SegmentEndResult(
+                j=self._pending_j,  # type: ignore[arg-type]
+                end_price=self._pending_end_price,  # type: ignore[arg-type]
+                end_type=EndType.TYPE2,
+                end_feature_element=self._pending_mid,  # type: ignore[arg-type]
+            )
         return None
 
-    if segment_direction == Direction.UP:
-        check_fn = check_top_fseq
-        verify_fn = check_bot_fseq  # Bot_FSeq_D for UP segment
-        t_ext_dir = Direction.UP
-    else:
-        check_fn = check_bot_fseq
-        verify_fn = check_top_fseq  # Top_FSeq_D for DOWN segment
-        t_ext_dir = Direction.DOWN
 
-    for j in range(1, len(merged_fseq) - 1):
-        if not check_fn(merged_fseq, j):
-            continue
-        # Check NO overlap between C'_{j-1} and C'_j (gap / 缺口)
-        prev_el, cur_el = merged_fseq[j - 1], merged_fseq[j]
-        if overlap(prev_el.low, prev_el.high, cur_el.low, cur_el.high):
-            continue  # This would be Type1End territory
+# ═══════════════════════════════════════════════════════════
+#  End-pen index mapping
+# ═══════════════════════════════════════════════════════════
 
-        # Compute t_extreme from C'_j
-        t_ext = find_t_extreme(cur_el, t_ext_dir)
 
-        # Build verification sequence
-        d_prime = build_verification_sequence(pens, segment_direction, t_ext)
+def map_end_pen_idx(
+    all_pens: list[Pen],
+    seg_first_pen_idx: int,
+    result: SegmentEndResult,
+    direction: Direction,
+    F: list[FeatureElement],
+) -> int | None:
+    """Map the triggering feature element back to the segment's last pen.
 
-        if len(d_prime) < 3:
-            continue
+    The last pen is the same-direction pen immediately before the pen that
+    reaches C'_j's extremum. Returns None if the resulting segment length
+    violates A1 (odd, ≥ 3).
+    """
+    E_j = _extremum_candidate_set(result.end_feature_element, direction, F)
+    if not E_j:
+        return None
+    t = min(E_j)
+    target_pen = F[t].src_pens[0]
 
-        # Check for reverse fractal in verification sequence
-        for r in range(1, len(d_prime) - 1):
-            if verify_fn(d_prime, r):
-                # Type2End confirmed
-                if segment_direction == Direction.UP:
-                    return cur_el.high
-                else:
-                    return cur_el.low
+    abs_p: int | None = None
+    for idx in range(seg_first_pen_idx + 1, len(all_pens)):
+        if all_pens[idx] is target_pen:
+            abs_p = idx
+            break
+    if abs_p is None:
+        return None
 
-    return None
+    end_idx = abs_p - 1
+    seg_len = end_idx - seg_first_pen_idx + 1
+    if seg_len < 3 or seg_len % 2 != 1:
+        return None
+    return end_idx
+
+
+__all__ = [
+    "EndType",
+    "FeatureElement",
+    "SegmentEndResult",
+    "EigenFX",
+    "map_end_pen_idx",
+    # Exposed helpers (consumed by tests and _segment.py).
+    "_has_inclusion",
+    "_merge_star",
+    "_gap",
+    "_top_fseq",
+    "_bot_fseq",
+    "_std_verify",
+    "_extremum_candidate_set",
+    "_reverse_verify",
+]

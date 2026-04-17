@@ -216,7 +216,7 @@ def test_search_pivots_with_leave_and_new() -> None:
         _pen(11, 19, 20, 30, Direction.UP),      # P2
         # P0-P2 form Z0, ZD=12, ZG=18
         _pen(19, 25, 30, 40, Direction.DOWN),    # P3 leaves up (low=19>ZG=18)
-        # leave_pen = P3, new search from P4 (leave+1)
+        # leave_pen = P3, new search starts from P3
         _pen(25, 35, 40, 50, Direction.UP),      # P4
         _pen(33, 28, 50, 60, Direction.DOWN),    # P5
         _pen(27, 34, 60, 70, Direction.UP),      # P6
@@ -230,20 +230,21 @@ def test_search_pivots_with_leave_and_new() -> None:
     assert pivots[1].zg == min(35, 33, 34)  # 33
 
 
-def test_search_pivots_leave_plus_1() -> None:
-    """Leave pen is NOT part of new pivot search (S09)."""
+def test_search_pivots_leave_pen_search_window() -> None:
+    """S09: search restarts from leave pen (it enters the search window,
+    but only joins Z1 if the three-overlap condition is met)."""
     pens: list[Pen] = [
         _pen(10, 20, 1, 10, Direction.UP),
         _pen(18, 12, 10, 20, Direction.DOWN),
         _pen(11, 19, 20, 30, Direction.UP),
-        _pen(19, 25, 30, 40, Direction.DOWN),  # leave pen
-        _pen(25, 35, 40, 50, Direction.UP),    # search starts here
+        _pen(19, 25, 30, 40, Direction.DOWN),  # leave pen — enters search window
+        _pen(25, 35, 40, 50, Direction.UP),
         _pen(33, 28, 50, 60, Direction.DOWN),
         _pen(27, 34, 60, 70, Direction.UP),
     ]
     pivots = search_pivots(pens)
-    # Leave pen (P3) should NOT be in Z1's components
     assert len(pivots) == 2
+    # In this sample, P3 does not form overlap with P4+P5, so Z1 starts from P4.
     z1_components = pivots[1].components
     leave_pen = pens[3]
     assert leave_pen not in z1_components
@@ -324,14 +325,14 @@ def _load_300811_pens() -> list[Pen]:
 
 
 def test_300811_pivot_count() -> None:
-    """300811.SZ: 17 pens → 2 pivots."""
+    """300811.SZ: 21 pens → 2 pivots."""
     pens = _load_300811_pens()
     pivots = search_pivots(pens)
     assert len(pivots) == 2
 
 
 def test_300811_z0_boundaries() -> None:
-    """Z0: initial P0,P1,P2 → ZD=40.51, ZG=44.07."""
+    """Z0: initial P0,P1,P2 → ZD=40.80, ZG=44.07."""
     pens = _load_300811_pens()
     pivots = search_pivots(pens)
     z0 = pivots[0]
@@ -349,13 +350,14 @@ def test_300811_z0_extension_then_leave() -> None:
 
 
 def test_300811_z1_starts_from_p5() -> None:
-    """Z1 search starts from P5 (leave_pen P4 + 1)."""
+    """Z1 search window starts from P4 (leave pen); P4,P5,P6 don't overlap,
+    so Z1 actually forms from P5,P6,P7."""
     pens = _load_300811_pens()
     pivots = search_pivots(pens)
     z1 = pivots[1]
-    # P5 = UP from 54.40 to 82.50
-    assert z1.zg == pytest.approx(82.50, abs=0.01)
-    assert z1.zd == pytest.approx(68.59, abs=0.01)
+    # P5 = UP from 54.40 to 77.95
+    assert z1.zg == pytest.approx(77.95, abs=0.01)
+    assert z1.zd == pytest.approx(69.70, abs=0.01)
 
 
 def test_300811_z1_no_leave() -> None:
@@ -363,8 +365,8 @@ def test_300811_z1_no_leave() -> None:
     pens = _load_300811_pens()
     pivots = search_pivots(pens)
     z1 = pivots[1]
-    # P5 through P16 should all extend (12 components)
-    expected_components = len(pens) - 5  # P5..P16 = 12
+    # P5 through P20 should all extend (16 components)
+    expected_components = len(pens) - 5  # P5..P20 = 16
     assert len(z1.components) == expected_components
 
 

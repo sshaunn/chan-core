@@ -104,23 +104,76 @@ C1 在标准K线维度检查结构独立性。C2 在原始K线维度检查间距
 
 **Modules**: [`_segment.py`](_segment.py), [`_feature_sequence.py`](_feature_sequence.py)
 
-A segment is formed by ≥ 3 pens (odd count), where the first and third pens overlap. Termination is determined by feature sequence fractals (Type1End / Type2End).
+A segment is formed by ≥ 3 pens (odd count), first and third pens overlapping, direction determined by the first pen. Segment identification uses a three-stage recursive procedure matching Book §6.3.4's three worked examples.
 
-线段由 ≥ 3 笔（奇数）组成，前三笔必须有重叠。终结由特征序列分型决定。
+线段由 ≥ 3 笔（奇数）组成，前三笔重叠，方向由首笔决定。段识别采用三阶段递进流程，对应书本 §6.3.4 三个实战案例。
 
-**Feature sequence / 特征序列**: Opposite-direction pens within the segment, treated as virtual K-lines and merged using the same inclusion rules.
+**Three iron rules / 三铁则** (§6.1.1):
 
-特征序列为线段内反向笔，视为虚拟K线，使用相同的包含合并规则处理。
+| Rule | Condition |
+|------|-----------|
+| A1 | `|S| = 2k + 1, k ≥ 1` |
+| A2 | `I(B_1) ∩ I(B_3) ≠ ∅` |
+| A3 | `direction(S) = direction(B_1)` |
 
-**Type1End / 第一类终结**: Feature sequence fractal exists, AND the fractal element overlaps with its predecessor.
+**A3.1 Directional dominance / 方向主导** (§6.1.1 + 78 课): Segment trajectory must align with direction — UP needs `end > start`, DOWN needs `end < start`.
 
-特征序列分型成立，且分型元素与前一元素有重叠。
+### Three-stage recursive identification / 三阶段递进识别
 
-**Type2End / 第二类终结**: Feature sequence fractal exists, NO overlap (gap), AND a verification sequence in the same direction as the segment produces a reverse fractal.
+**Stage B/C — Feature sequence method / 特征序列法** (§6.2–§6.3):
 
-特征序列分型成立，无重叠（缺口），且同向验证序列产生反向分型。
+`EigenFX` incremental state machine with O(1) amortised per pen:
 
-**State machine / 状态机**: `BUILDING → CONFIRMED` (irreversible).
+- **Feature sequence F** / 特征序列: opposite-direction pens in segment, treated as virtual K-lines
+- **Primary standardisation C'** / 主序列标准化 (§6.2.3): first two elements never merge; from the 3rd onwards, merge with stack top under directional rule (UP = high-high, DOWN = low-low)
+- **Type1End / 第一类终结** (§6.3.2 case 1): Main fractal with NO gap at `(C'_{j-1}, C'_j)` → segment ends at the fractal extremum
+- **Type2End / 第二类终结** (§6.3.2 case 2): Main fractal WITH gap, plus reverse verification on verification sequence V' (suffix of F starting from extremum anchor), where V' uses OPPOSITE merge direction AND processes first-two inclusion. Reverse fractal in V' → segment ends
+
+First-hit commit (`j` ascending, irreversible). Pending state during Type2End verification allows incremental reverse sequence growth.
+
+**Stage A — Extreme fallback / 极值法兜底** (§6.3.4 case 1):
+
+If Stage B/C fails (common in monotonic data where reverse fractal cannot form), scan window for the most-extreme top/bot pen, use it as segment endpoint anchor, re-verify with three iron rules + A3.1. Succeeds → `end_type = EXTREME`.
+
+特征序列法失败时（单调趋势无反向分型），扫窗口价格极值作为段终点锚,三铁则 + A3.1 验证。
+
+**Constructive fallback / 构造性兜底** (§6.1.1 "3-pen segment"):
+
+If both Stage B/C and Stage A fail, output the longest valid odd-length pen chain with A2 + A3.1. `state = BUILDING`, `end_type = TENTATIVE` — tail-end segments not yet fully terminated.
+
+### Pass 2 — Segment extension / 段合并延伸 (§6.3.3)
+
+After Pass 1 produces a segment sequence, scan each adjacent pair `(S_k, S_{k+1})`:
+
+1. Search within `S_{k+1}.pens[1:]` for a legal reverse segment `R` with direction = `S_k.direction` (CONFIRMED only; TENTATIVE rejected).
+2. If `R.end_price` strictly exceeds `S_k.end_price` in `S_k`'s direction → absorb: `S_k^new = S_k.pens + [S_{k+1}.pens[0]] + R.pens`.
+3. Re-verify A1 + A3.1 on `S_k^new`. Remaining pens re-identified with strict starting direction.
+4. `end_type = EXTENDED`. `k` stays for chain absorption.
+
+书本 §6.3.3 "如果缺口被封闭，则原线段延伸" 的直接实装。
+
+### Segment output / 段输出
+
+Each segment is emitted as a `SegmentSnapshot` with `end_type ∈ {TYPE1, TYPE2, EXTREME, EXTENDED, TENTATIVE}`:
+
+| end_type | Source | state |
+|----------|--------|-------|
+| `TYPE1` | §6.3.2 case 1 (no gap) | CONFIRMED |
+| `TYPE2` | §6.3.2 case 2 (gap + reverse verified) | CONFIRMED |
+| `EXTREME` | §6.3.4 case 1 (extreme fallback) | CONFIRMED |
+| `EXTENDED` | §6.3.3 (Pass 2 absorption) | CONFIRMED |
+| `TENTATIVE` | §6.1.1 (constructive fallback) | **BUILDING** |
+
+Downstream (pivot, trend) uses only CONFIRMED segments; TENTATIVE is for tail-end transparency.
+
+**Broken by pen / 被笔破坏** (§6.3.3): warning only, NOT a termination trigger. Available as metadata for signal layer.
+
+### Complexity / 复杂度
+
+- `EigenFX.add`: O(1) amortised (based on C'/V' stack invariants)
+- Single segment identification: O(N)
+- `build_segments` main loop: **O(N²) worst**, O(N) typical on real data
+- Measured: 000001 six-year, 1518 raw K-lines / 149 pens, **0.6 ms** total
 
 ---
 
@@ -161,12 +214,12 @@ Invariant: `DD ≤ ZD < ZG ≤ GG`
 **Module**: [`_pivot.py`](_pivot.py)
 
 ```
-next_search_start = leave_pen_index + 1
+next_search_start = leave_pen_index
 ```
 
-The leave pen belongs to the connection segment between two pivots (`a + Z₁ + b + Z₂ + c`), not to the new pivot. Search for the next pivot starts from the pen **after** the leave pen.
+The leave pen does not overlap `[ZD, ZG]` of the current pivot, so it belongs to the next structure. Search for the next pivot starts from the **leave pen itself** (it can become the first pen of the next pivot).
 
-离开笔属于两个中枢之间的连接段，不属于新中枢。新中枢搜索从离开笔的下一根笔开始。
+离开笔与当前中枢核心区间无重叠,属于新结构起始。新中枢搜索从离开笔本身开始。
 
 ---
 
@@ -181,8 +234,8 @@ Requires `structure_complete = True`. Classification is purely structural, no di
 | Type | Condition |
 |------|-----------|
 | **Consolidation / 盘整** | 1 pivot |
-| **Up Trend / 上涨趋势** | ≥ 2 pivots, `DD_{k+1} > GG_k` for all k |
-| **Down Trend / 下跌趋势** | ≥ 2 pivots, `GG_{k+1} < DD_k` for all k |
+| **Up Trend / 上涨趋势** | ≥ 2 pivots, `ZD_{k+1} > ZG_k` for all k (core intervals) |
+| **Down Trend / 下跌趋势** | ≥ 2 pivots, `ZG_{k+1} < ZD_k` for all k (core intervals) |
 
 ---
 
@@ -190,13 +243,17 @@ Requires `structure_complete = True`. Classification is purely structural, no di
 
 Levels are produced by structural recursion, separated from time periods.
 
-级别由结构递归产生，与时间周期分离。
+级别由结构递归产生,与时间周期分离。
 
-| Level | Trend | Pivot components | Completion |
-|-------|-------|-----------------|------------|
+| Level | Trend (走势) | Pivot components (中枢构成) | Completion (完成判定) |
+|-------|-------------|---------------------------|---------------------|
 | L0 | Segment | Pen | `SegState = CONFIRMED` |
-| L1 | Composed of L0 pivots/trends | Confirmed segments | `structure_complete_L1` |
-| Lk | Composed of L(k-1) | L(k-1) completed trends | `structure_complete_Lk` |
+| L1 | Composed of confirmed segments | Confirmed segments | `structure_complete_by_pivot` (ExitSeq + i*) |
+| Lk | Composed of L(k-1) completed trends | L(k-1) completed trends | Same ExitSeq + i* formula |
+
+**Implementation status**: L0 and L1 are fully implemented. L2+ awaits L1 completed trends.
+
+**实装状态**: L0 和 L1 已完整实现。L2+ 待 L1 产出已完成走势后递归构建。
 
 ---
 
@@ -206,18 +263,16 @@ Levels are produced by structural recursion, separated from time periods.
 
 Answers only: *"Is the trend structurally finished?"* Does not depend on divergence, buy/sell points, or any signal-layer concept.
 
-只回答"走势结构是否走完"，不依赖背驰、买卖点或任何信号层概念。
+只回答"走势结构是否走完",不依赖背驰、买卖点或任何信号层概念。
+
+**L0**: `structure_complete_l0(segment) -> bool` — simply checks `SegState == CONFIRMED`. No pivots or ExitSeq needed.
+
+**L1+**: `structure_complete_by_pivot(pivots, sub_trends) -> CompletionTrace` — uses ExitSeq + i* formula:
 
 **ExitSeq**: Sub-trends after the last pivot that satisfy the leave condition, collected in time order.
 
-离开序列：最后一个中枢之后满足离开条件的次级别走势，按时间顺序收集。
-
 **i\***: First index where three consecutive ExitSeq elements form a new pivot (`ZD < ZG`).
 
-首个满足三段形成新中枢的位置。
-
-**t_end**: `max(t_end(V))` for all sub-trends V that end before `W_{i*}` starts.
+**t_end**: `max(t_end(V))` for all sub-trends V where `t_end(V) < t_start(W_{i*})` (strict `<`).
 
 **awaiting_new_pivot**: ExitSeq is non-empty but `i*` does not exist. Observation state, not a signal.
-
-离开序列非空但 i* 不存在。结构观察状态，不是信号。

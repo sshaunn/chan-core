@@ -1,7 +1,6 @@
-"""Pivot (中枢) builder, extension/leave logic, and search.
+"""Pivot builder, extension/leave logic, and search (S07–S09).
 
-Implements S07-S09: pivot formation, four boundaries, extension/leave,
-and search start = leave_pen + 1.
+See `structure/README.md` S07–S09 for the full specification.
 """
 
 from __future__ import annotations
@@ -129,8 +128,9 @@ def check_leave(
 def search_pivots(pens: Sequence[SubTrendLike]) -> list[PivotBuilder]:
     """Search for pivots in a pen/sub-trend sequence.
 
-    Search start = leave_pen_index + 1 (S09: leave pen is the connection
-    segment b between Z1 and Z2, not part of Z2).
+    The leave pen does not overlap [ZD, ZG] of the current pivot, so it
+    belongs to the next structure. New search starts from the leave pen
+    itself (it becomes the candidate first pen of the next pivot).
     """
     n = len(pens)
     pivots: list[PivotBuilder] = []
@@ -162,7 +162,7 @@ def search_pivots(pens: Sequence[SubTrendLike]) -> list[PivotBuilder]:
         if leave_idx is None:
             break  # End of data
 
-        # S09: new search starts from leave_pen + 1
-        i = leave_idx + 1
+        # Leave pen belongs to next pivot's search window.
+        i = leave_idx
 
     return pivots

@@ -23,21 +23,21 @@ def test_consolidation_one_pivot() -> None:
 
 
 def test_up_trend_two_pivots() -> None:
-    """DD2 > GG1 → up trend."""
+    """ZD2 > ZG1 → up trend (§3.2 core interval)."""
     pivots = [_pivot(10, 20, 5, 25), _pivot(30, 40, 26, 45)]
     assert classify_trend(pivots, True) == TrendType.UP_TREND
 
 
 def test_down_trend_two_pivots() -> None:
-    """GG2 < DD1 → down trend."""
+    """ZG2 < ZD1 → down trend (§3.2 core interval)."""
     pivots = [_pivot(30, 40, 25, 45), _pivot(10, 20, 5, 24)]
     assert classify_trend(pivots, True) == TrendType.DOWN_TREND
 
 
 def test_up_trend_five_pivots() -> None:
     pivots = [_pivot(i * 10, i * 10 + 5, i * 10 - 2, i * 10 + 7) for i in range(5)]
-    # DD[k+1] = (k+1)*10-2, GG[k] = k*10+7
-    # Need DD[k+1] > GG[k]: (k+1)*10-2 > k*10+7 → 10-2 > 7 → 8 > 7 ✓
+    # ZD[k+1] = (k+1)*10, ZG[k] = k*10+5
+    # Need ZD[k+1] > ZG[k]: (k+1)*10 > k*10+5 → 10 > 5 ✓
     assert classify_trend(pivots, True) == TrendType.UP_TREND
 
 
@@ -62,15 +62,15 @@ def test_two_pivots_overlapping() -> None:
 # ── Boundary ──────────────────────────────────────────────
 
 
-def test_up_trend_dd_equals_gg_fails() -> None:
-    """DD2 == GG1 → strict inequality not met → not up trend."""
-    pivots = [_pivot(10, 20, 5, 25), _pivot(30, 40, 25, 45)]
+def test_up_trend_zd_equals_zg_fails() -> None:
+    """ZD2 == ZG1 → strict inequality not met → not up trend."""
+    pivots = [_pivot(10, 20, 5, 25), _pivot(20, 40, 15, 45)]
     assert classify_trend(pivots, True) is None
 
 
-def test_down_trend_gg_equals_dd_fails() -> None:
-    """GG2 == DD1 → strict inequality not met → not down trend."""
-    pivots = [_pivot(30, 40, 25, 45), _pivot(10, 20, 5, 25)]
+def test_down_trend_zg_equals_zd_fails() -> None:
+    """ZG2 == ZD1 → strict inequality not met → not down trend."""
+    pivots = [_pivot(20, 40, 15, 45), _pivot(10, 20, 5, 25)]
     assert classify_trend(pivots, True) is None
 
 
@@ -82,6 +82,6 @@ def test_mixed_pivots_not_trend() -> None:
     pivots = [
         _pivot(10, 20, 5, 25),
         _pivot(30, 40, 26, 45),
-        _pivot(15, 25, 10, 30),  # DD=10 < GG1=45
+        _pivot(15, 25, 10, 30),  # ZD=15 < ZG1=40 → not continuing up
     ]
     assert classify_trend(pivots, True) is None

@@ -12,7 +12,9 @@ import pytest
 from chan_core import ChanEngine, RawKLine
 from chan_core.common.types import Direction, FractalType, TrendType
 from chan_core.engine import AnalysisResult
+from chan_core.structure._completion import structure_complete_by_pivot
 from chan_core.structure._merge import has_inclusion
+from chan_core.structure._pivot import search_pivots
 
 
 def _load_csv(filename: str) -> list[RawKLine]:
@@ -69,7 +71,7 @@ class Test300811:
         assert len(bots) == 42
 
     def test_pen_count(self, result: AnalysisResult) -> None:
-        assert len(result.pens) == 17
+        assert len(result.pens) == 21
 
     def test_pen_zero_gap(self, result: AnalysisResult) -> None:
         for i in range(len(result.pens) - 1):
@@ -85,11 +87,12 @@ class Test300811:
     def test_pen_values(self, result: AnalysisResult) -> None:
         expected = [
             (44.07, 39.98), (39.98, 44.88), (44.88, 40.51),
-            (40.51, 62.53), (62.53, 54.40), (54.40, 82.50),
-            (82.50, 68.59), (68.59, 87.36), (87.36, 65.10),
-            (65.10, 76.78), (76.78, 67.53), (67.53, 86.10),
-            (86.10, 73.05), (73.05, 91.00), (91.00, 75.03),
-            (75.03, 81.96), (81.96, 72.75),
+            (40.51, 62.53), (62.53, 54.40), (54.40, 77.95),
+            (77.95, 69.70), (69.70, 82.50), (82.50, 68.01),
+            (68.01, 79.77), (79.77, 68.59), (68.59, 87.36),
+            (87.36, 65.10), (65.10, 76.78), (76.78, 67.53),
+            (67.53, 84.10), (84.10, 73.05), (73.05, 91.00),
+            (91.00, 75.03), (75.03, 81.96), (81.96, 72.75),
         ]
         for i, (sv, ev) in enumerate(expected):
             assert result.pens[i].start.value == pytest.approx(sv, abs=0.01)
@@ -105,43 +108,41 @@ class Test300811:
 
     def test_z1_boundaries(self, result: AnalysisResult) -> None:
         z1 = result.pivots[1]
-        assert z1.zg == pytest.approx(82.50, abs=0.01)
-        assert z1.zd == pytest.approx(68.59, abs=0.01)
+        assert z1.zg == pytest.approx(77.95, abs=0.01)
+        assert z1.zd == pytest.approx(69.70, abs=0.01)
 
     def test_four_boundary_invariant(self, result: AnalysisResult) -> None:
         for p in result.pivots:
             assert p.dd <= p.zd < p.zg <= p.gg
 
     def test_structure_complete_true(self, result: AnalysisResult) -> None:
-        """T1 containing Z0 is complete."""
-        assert len(result.trends) >= 1
-        trend = result.trends[0]
-        assert trend.structure_complete is True
+        """L0 pivots exist (pen-level segments confirmed)."""
+        assert len(result.l0_pivots) == 2
 
     def test_trend_classification(self, result: AnalysisResult) -> None:
-        """1 pivot (Z0) in complete trend → consolidation."""
-        # The whole analysis has 2 pivots, but structure_complete is based
-        # on exit sequence of last pivot. Since we compute for the full
-        # sequence, the trend type depends on the overall result.
-        trend = result.trends[0]
-        # With 2 pivots + complete, check classification
-        if len(trend.pivots) == 2:
-            # Not a simple consolidation — depends on DD/GG relationship
-            pass  # Classification tested separately
-        elif len(trend.pivots) == 1:
-            assert trend.trend_type == TrendType.CONSOLIDATION
+        """L1 has 0 pivots → single incomplete trend, no classification."""
+        assert len(result.l1_trends) == 1
+        trend = result.l1_trends[0]
+        assert trend.structure_complete is False
+        assert trend.trend_type is None
 
     def test_i_star_exists(self, result: AnalysisResult) -> None:
-        trend = result.trends[0]
-        assert trend.completion.i_star is not None
+        """L0 pen-level ExitSeq+i* still works via structure_complete_by_pivot."""
+        l0_pbs = search_pivots(list(result.pens))
+        trace = structure_complete_by_pivot([l0_pbs[0]], list(result.pens))
+        assert trace.i_star is not None
 
     def test_t_end_exists(self, result: AnalysisResult) -> None:
-        trend = result.trends[0]
-        assert trend.completion.t_end is not None
+        """L0 pen-level t_end exists via structure_complete_by_pivot."""
+        l0_pbs = search_pivots(list(result.pens))
+        trace = structure_complete_by_pivot([l0_pbs[0]], list(result.pens))
+        assert trace.t_end is not None
 
     def test_exit_seq_not_empty(self, result: AnalysisResult) -> None:
-        trend = result.trends[0]
-        assert len(trend.completion.exit_seq_ids) > 0
+        """L0 pen-level exit sequence is non-empty."""
+        l0_pbs = search_pivots(list(result.pens))
+        trace = structure_complete_by_pivot([l0_pbs[0]], list(result.pens))
+        assert len(trace.exit_seq_ids) > 0
 
     def test_source_indices_complete(self, result: AnalysisResult) -> None:
         """Every raw index appears exactly once."""

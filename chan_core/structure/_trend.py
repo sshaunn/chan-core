@@ -1,7 +1,6 @@
-"""Trend classification (走势分类).
+"""Trend classification (S10).
 
-Implements S10: consolidation / up-trend / down-trend based on
-pivot count and DD/GG relationships. Requires structure_complete.
+See `structure/README.md` S10 for the full specification.
 """
 
 from __future__ import annotations
@@ -26,16 +25,16 @@ def classify_trend(
     if len(pivots) == 1:
         return TrendType.CONSOLIDATION
 
-    # Check if all adjacent pivots satisfy up-trend condition
+    # Book §3.2: trend is determined by core interval (ZD/ZG) relationships,
+    # not the extended envelope (DD/GG).
     all_up = all(
-        pivots[k + 1].dd > pivots[k].gg for k in range(len(pivots) - 1)
+        pivots[k + 1].zd > pivots[k].zg for k in range(len(pivots) - 1)
     )
     if all_up:
         return TrendType.UP_TREND
 
-    # Check if all adjacent pivots satisfy down-trend condition
     all_down = all(
-        pivots[k + 1].gg < pivots[k].dd for k in range(len(pivots) - 1)
+        pivots[k + 1].zg < pivots[k].zd for k in range(len(pivots) - 1)
     )
     if all_down:
         return TrendType.DOWN_TREND

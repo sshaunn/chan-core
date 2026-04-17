@@ -1,7 +1,7 @@
-"""Inclusion-relationship merge engine (包含关系归并器).
+"""K-line inclusion merge (S01).
 
-Implements S01: K-line standardisation.
 Single-pass left-to-right, no backtracking.
+See `structure/README.md` S01 for the full specification.
 """
 
 from chan_core.common.kline import MergedKLine, RawKLine
@@ -24,7 +24,7 @@ def get_merge_direction(
 ) -> Direction:
     """Determine merge direction based on the previous non-inclusive bar.
 
-    If no previous bar exists (sequence start), default to UP [ENG D01].
+    If no previous bar exists (sequence start), default to UP.
     """
     if prev is None:
         return Direction.UP

@@ -48,9 +48,11 @@ result = engine.analyze(klines)
 print(f"Merged K-lines: {len(result.merged_klines)}")
 print(f"Fractals: {len(result.fractals)}")
 print(f"Pens: {len(result.pens)}")
-print(f"Pivots: {len(result.pivots)}")
-for trend in result.trends:
-    print(f"Trend: {trend.trend_type}, complete={trend.structure_complete}")
+print(f"Segments: {len(result.segments)}")
+print(f"L0 Pivots (pen-level): {len(result.l0_pivots)}")
+print(f"L1 Pivots (segment-level): {len(result.l1_pivots)}")
+for trend in result.l1_trends:
+    print(f"L1 Trend: {trend.trend_type}, complete={trend.structure_complete}")
 ```
 
 ## Testing / 测试
@@ -83,8 +85,8 @@ chan_core/
 │   ├── _merge.py            # S01: K-line inclusion merge
 │   ├── _fractal.py          # S02: Fractal detection
 │   ├── _pen.py              # S03: Pen (confirmed algorithm)
-│   ├── _segment.py          # S04–S06: Segment state machine
-│   ├── _feature_sequence.py # S04–S06: Feature sequence + Type1/Type2End
+│   ├── _segment.py          # S04–S06: Segment builder (three-stage + Pass 2)
+│   ├── _feature_sequence.py # S04–S06: Feature sequence + EigenFX state machine
 │   ├── _pivot.py            # S07–S09: Pivot + extension/leave + search
 │   ├── _trend.py            # S10: Trend classification
 │   └── _completion.py       # S11–S12: Level recursion + structure_complete

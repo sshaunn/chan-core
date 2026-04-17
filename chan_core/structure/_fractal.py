@@ -1,6 +1,6 @@
-"""Fractal (分型) value object and detection logic.
+"""Fractal detection (S02).
 
-Implements S02: strict inequality fractal detection.
+See `structure/README.md` S02 for the full specification.
 """
 
 from dataclasses import dataclass

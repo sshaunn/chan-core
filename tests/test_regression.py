@@ -124,22 +124,21 @@ class TestRegression300811:
         assert len(result.fractals) == 84
 
     def test_pen_count(self, result: AnalysisResult) -> None:
-        assert len(result.pens) == 17
+        assert len(result.pens) == 21
 
     def test_pivot_count(self, result: AnalysisResult) -> None:
         assert len(result.pivots) == 2
 
     def test_trend_count(self, result: AnalysisResult) -> None:
-        assert len(result.trends) == 2
+        assert len(result.trends) == 1
 
-    def test_t1_complete(self, result: AnalysisResult) -> None:
-        assert result.trends[0].structure_complete is True
+    def test_t1_not_complete(self, result: AnalysisResult) -> None:
+        """L1 has 0 pivots → single incomplete trend."""
+        assert result.trends[0].structure_complete is False
 
-    def test_t1_consolidation(self, result: AnalysisResult) -> None:
-        assert result.trends[0].trend_type == TrendType.CONSOLIDATION
-
-    def test_t2_not_complete(self, result: AnalysisResult) -> None:
-        assert result.trends[1].structure_complete is False
+    def test_t1_no_classification(self, result: AnalysisResult) -> None:
+        """L1 incomplete trend has no classification."""
+        assert result.trends[0].trend_type is None
 
     def test_z0_zd(self, result: AnalysisResult) -> None:
         assert result.pivots[0].zd == pytest.approx(40.51, abs=0.01)
@@ -148,10 +147,10 @@ class TestRegression300811:
         assert result.pivots[0].zg == pytest.approx(44.07, abs=0.01)
 
     def test_z1_zd(self, result: AnalysisResult) -> None:
-        assert result.pivots[1].zd == pytest.approx(68.59, abs=0.01)
+        assert result.pivots[1].zd == pytest.approx(69.70, abs=0.01)
 
     def test_z1_zg(self, result: AnalysisResult) -> None:
-        assert result.pivots[1].zg == pytest.approx(82.50, abs=0.01)
+        assert result.pivots[1].zg == pytest.approx(77.95, abs=0.01)
 
     def test_first_pen_values(self, result: AnalysisResult) -> None:
         p0 = result.pens[0]
@@ -160,7 +159,7 @@ class TestRegression300811:
         assert p0.direction == Direction.DOWN
 
     def test_last_pen_values(self, result: AnalysisResult) -> None:
-        p16 = result.pens[16]
-        assert p16.start.value == pytest.approx(81.96, abs=0.01)
-        assert p16.end.value == pytest.approx(72.75, abs=0.01)
-        assert p16.direction == Direction.DOWN
+        p20 = result.pens[20]
+        assert p20.start.value == pytest.approx(81.96, abs=0.01)
+        assert p20.end.value == pytest.approx(72.75, abs=0.01)
+        assert p20.direction == Direction.DOWN

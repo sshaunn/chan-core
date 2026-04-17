@@ -1,7 +1,11 @@
-"""structure_complete(T) and related functions.
+"""Structure completion (S11–S12).
 
-Implements S12: walk completion purely from structure,
-no signal-layer dependencies.
+See `structure/README.md` S11–S12 for the full specification.
+
+Level hierarchy:
+  L0: pens → L0 pivots; L0 trend = segment; L0 complete = SegState==CONFIRMED
+  L1: confirmed segments → L1 pivots; L1 complete = ExitSeq + i* over segments
+  Lk: L(k-1) completed trends → Lk pivots; same ExitSeq + i* formula
 """
 
 from __future__ import annotations
@@ -11,7 +15,7 @@ from typing import Sequence
 from chan_core.common.math_utils import strict_overlap
 from chan_core.common.protocols import SubTrendLike
 from chan_core.common.types import SegmentState
-from chan_core.engine import CompletionTrace, PivotSnapshot
+from chan_core.engine import CompletionTrace, PivotSnapshot, SegmentSnapshot
 from chan_core.structure._pivot import PivotBuilder, check_extension
 
 
@@ -79,15 +83,23 @@ def find_i_star(exit_seq: list[SubTrendLike]) -> int | None:
     return None
 
 
-def structure_complete_l0(
-    pivots: list[PivotBuilder],
-    pens: Sequence[SubTrendLike],
-) -> CompletionTrace:
-    """L0-level structure_complete.
+def structure_complete_l0(segment: SegmentSnapshot) -> bool:
+    """L0 structure_complete: a segment is complete iff CONFIRMED.
 
-    Checks whether the walk (trend) is structurally complete by
-    looking for a new pivot forming in the exit sequence of the
-    last pivot.
+    §12.2: structure_complete_L0(T) ⟺ SegState(T) = CONFIRMED.
+    L0 trend = segment; no pivot/ExitSeq needed at this level.
+    """
+    return segment.state == SegmentState.CONFIRMED
+
+
+def structure_complete_by_pivot(
+    pivots: list[PivotBuilder],
+    sub_trends: Sequence[SubTrendLike],
+) -> CompletionTrace:
+    """Generic structure_complete via pivot ExitSeq + i* (for L1+).
+
+    Used at L1 (sub_trends = confirmed segments) and higher levels.
+    Checks whether the last pivot's exit sequence forms a new pivot.
     """
     if not pivots:
         return CompletionTrace(
@@ -98,7 +110,7 @@ def structure_complete_l0(
         )
 
     last_pivot = pivots[-1].to_snapshot()
-    exit_seq = build_exit_sequence(last_pivot, pens)
+    exit_seq = build_exit_sequence(last_pivot, sub_trends)
 
     exit_ids = tuple(
         _get_id(st) for st in exit_seq
@@ -108,11 +120,8 @@ def structure_complete_l0(
 
     t_end: str | None = None
     if i_star is not None:
-        # t_end = max(t_end(V)) for V in Pred(T, i*)
-        # Pred = all sub-trends before W_{i*}
         w_i_star = exit_seq[i_star]
         from chan_core.structure._pen import Pen
-        from chan_core.engine import SegmentSnapshot
 
         if isinstance(w_i_star, Pen):
             w_start_time = w_i_star.start.klines[1].timestamp
@@ -121,16 +130,15 @@ def structure_complete_l0(
         else:
             w_start_time = ""
 
-        # Find the last sub-trend that ends before W_{i*} starts
         pred_end_times: list[str] = []
-        for st in pens:
+        for st in sub_trends:
             if isinstance(st, Pen):
                 st_end = st.end.klines[1].timestamp
             elif isinstance(st, SegmentSnapshot):
                 st_end = st.pens[-1].end.klines[1].timestamp
             else:
                 continue
-            if st_end <= w_start_time:
+            if st_end < w_start_time:
                 pred_end_times.append(st_end)
 
         if pred_end_times:

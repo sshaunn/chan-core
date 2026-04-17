@@ -1,6 +1,6 @@
-"""Pen (笔) value object and confirmed-list algorithm.
+"""Pen (S03) with confirmed-list algorithm.
 
-Implements S03: confirmed list algorithm with C1/C2/C4 conditions.
+See `structure/README.md` S03 for the full specification.
 """
 
 from dataclasses import dataclass
@@ -46,20 +46,15 @@ def check_c1(a: Fractal, b: Fractal) -> bool:
 
 
 def check_c2(a: Fractal, b: Fractal) -> bool:
-    """C2 (raw K-line gap): at least 2 raw K-lines between two fractal extremes.
+    """C2 (raw K-line gap): at least 3 raw K-lines strictly between two fractal extremes.
 
-    K_p = extreme (middle) merged bar of F_a
-    K_q = extreme (middle) merged bar of F_b
-    Count raw K-lines strictly between K_p's last raw bar and K_q's first raw bar.
-    Require ≥ 2 (equivalently, raw index diff ≥ 3).
-
-    C1 checks structural independence on standard K-lines.
-    C2 checks distance on raw K-lines. Both must pass.
+    Book §5.3 p53: "顶分型的最低K线和底分型的最低K线间存在3根K线"
+    Equivalently: raw index diff ≥ 4.
     """
     a_last_raw = max(a.klines[1].source_indices)
     b_first_raw = min(b.klines[1].source_indices)
-    raw_gap = b_first_raw - a_last_raw  # raw index diff
-    return raw_gap >= 3
+    raw_gap = b_first_raw - a_last_raw
+    return raw_gap >= 4
 
 
 def check_c4(a: Fractal, b: Fractal) -> bool:
